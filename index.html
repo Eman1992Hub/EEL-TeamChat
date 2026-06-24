@@ -424,6 +424,27 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
 }
 .install-step-text{font-size:12px;color:var(--text)}
 
+/* ─── MESSAGE CONTEXT MENU ─── */
+.msg-ctx-menu{
+  position:fixed;background:var(--navy2);border:1px solid var(--border);
+  border-radius:10px;padding:4px;z-index:5000;min-width:140px;
+  box-shadow:0 8px 24px rgba(0,0,0,.5);
+  animation:ctxin .15s ease;
+}
+@keyframes ctxin{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.msg-ctx-item{
+  display:flex;align-items:center;gap:10px;padding:9px 14px;
+  border-radius:7px;cursor:pointer;font-size:13px;color:var(--text);
+  transition:background .15s;
+}
+.msg-ctx-item:hover{background:var(--navy3)}
+.msg-ctx-item.danger{color:var(--red)}
+.msg-ctx-item.danger:hover{background:rgba(239,68,68,.1)}
+.msg-ctx-divider{height:1px;background:var(--border);margin:3px 6px}
+/* Bubble hover effect to hint at interaction */
+.bubble{position:relative;transition:opacity .15s}
+.msg-row.own .bubble:active{opacity:.85}
+
 /* ─── TOAST ─── */
 .toast{
   position:fixed;bottom:24px;right:24px;background:var(--navy2);
@@ -575,8 +596,8 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
       </div>
       <div class="stats-row" id="stats-row"></div>
       <div class="admin-toolbar">
+        <button class="btn btn-gold" onclick="openAddWorkerModal()" style="flex-shrink:0">&#43; Add Worker</button>
         <input class="admin-search" id="admin-search" placeholder="&#128269;  Search workers..." oninput="renderWorkers()">
-        <button class="btn btn-gold" onclick="openAddWorkerModal()">&#43; Add Worker</button>
       </div>
       <div class="workers-list" id="workers-list"></div>
     </div>
@@ -596,9 +617,20 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
       <label class="form-label">Role *</label>
       <select class="form-select" id="aw-role">
         <option value="">Select role...</option>
-        <option>Driver</option><option>Dispatcher</option>
-        <option>Warehouse Staff</option><option>Accountant</option>
-        <option>Customer Service</option><option>Supervisor</option><option>Security</option>
+        <option>Driver</option>
+        <option>Dispatcher</option>
+        <option>Warehouse Staff</option>
+        <option>Accountant</option>
+        <option>Customer Service</option>
+        <option>Supervisor</option>
+        <option>Security</option>
+        <option>Data Clerk</option>
+        <option>HR</option>
+        <option>Office Assistant</option>
+        <option>Planner</option>
+        <option>Project Manager</option>
+        <option>Operations Manager</option>
+        <option>CEO / Director</option>
       </select>
     </div>
     <div class="form-group">
@@ -661,6 +693,9 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
     <button class="btn-install" onclick="document.getElementById('install-success').classList.remove('show')" style="width:100%;margin-top:8px">Got it!</button>
   </div>
 </div>
+
+<!-- Message context menu (injected dynamically) -->
+<div id="msg-ctx-menu" class="msg-ctx-menu" style="display:none"></div>
 
 <script>
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -929,7 +964,8 @@ function renderMessages(){
 
     var contentHtml='<div class="msg-col">';
     if(!isOwn&&showAv) contentHtml+='<div class="msg-sender">'+msg.sname+'</div>';
-    contentHtml+='<div class="bubble">';
+    var msgId = msg.id;
+    contentHtml+='<div class="bubble" data-msgid="'+msgId+'" data-own="'+isOwn+'">';
 
     if(msg.text) contentHtml+='<div>'+escHtml(msg.text)+'</div>';
 
@@ -950,6 +986,33 @@ function renderMessages(){
   });
 
   area.scrollTop=area.scrollHeight;
+
+  // Attach long-press and right-click to own message bubbles
+  area.querySelectorAll('.bubble[data-own="true"]').forEach(function(bubble) {
+    var pressTimer = null;
+
+    // Right-click (desktop)
+    bubble.addEventListener('contextmenu', function(e) {
+      e.preventDefault();
+      showMsgCtxMenu(e.clientX, e.clientY, bubble.getAttribute('data-msgid'));
+    });
+
+    // Long press (mobile) — 600ms hold
+    bubble.addEventListener('touchstart', function(e) {
+      var touch = e.touches[0];
+      pressTimer = setTimeout(function() {
+        showMsgCtxMenu(touch.clientX, touch.clientY, bubble.getAttribute('data-msgid'));
+      }, 600);
+    }, {passive: true});
+
+    bubble.addEventListener('touchend', function() {
+      if (pressTimer) clearTimeout(pressTimer);
+    });
+
+    bubble.addEventListener('touchmove', function() {
+      if (pressTimer) clearTimeout(pressTimer);
+    });
+  });
 }
 
 function escHtml(s){ return String(s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;"); }
@@ -1204,6 +1267,73 @@ function saveGroup(){
 function closeModal(id){ document.getElementById(id).style.display="none"; }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────────
+// ── MESSAGE CONTEXT MENU ─────────────────────────────────────────────────────
+function showMsgCtxMenu(x, y, msgId) {
+  var menu = document.getElementById('msg-ctx-menu');
+  menu.innerHTML =
+    '<div class="msg-ctx-item" id="ctx-copy"><span>&#128203;</span> Copy message</div>' +
+    '<div class="msg-ctx-divider"></div>' +
+    '<div class="msg-ctx-item danger" id="ctx-delete"><span>&#128465;</span> Delete message</div>';
+
+  // Attach handlers using captured msgId (avoids quote-escaping issues)
+  document.getElementById('ctx-copy').onclick   = function() { copyMessage(msgId); };
+  document.getElementById('ctx-delete').onclick = function() { deleteMessage(msgId); };
+
+  menu.style.display = 'block';
+
+  // Smart positioning — keep menu inside viewport
+  var menuW = 160, menuH = 90;
+  var vw = window.innerWidth, vh = window.innerHeight;
+  var left = x + menuW > vw ? vw - menuW - 12 : x;
+  var top  = y + menuH > vh ? y - menuH - 8   : y + 4;
+  menu.style.left = left + 'px';
+  menu.style.top  = top  + 'px';
+
+  // Close on next click/tap anywhere
+  setTimeout(function() {
+    document.addEventListener('click', closeMsgCtxMenu, {once: true});
+    document.addEventListener('touchstart', closeMsgCtxMenu, {once: true});
+  }, 50);
+}
+
+function closeMsgCtxMenu() {
+  var menu = document.getElementById('msg-ctx-menu');
+  if (menu) menu.style.display = 'none';
+}
+
+function deleteMessage(msgId) {
+  closeMsgCtxMenu();
+  if (!activeChat) return;
+  var arr = messages[activeChat];
+  if (!arr) return;
+  var idx = arr.findIndex(function(m) { return m.id === msgId; });
+  if (idx === -1) return;
+  // Only allow deleting own messages
+  if (arr[idx].sid !== currentUser.id) { showToast('You can only delete your own messages'); return; }
+  arr.splice(idx, 1);
+  renderMessages();
+  showToast('&#128465; Message deleted');
+}
+
+function copyMessage(msgId) {
+  closeMsgCtxMenu();
+  if (!activeChat) return;
+  var arr = messages[activeChat];
+  if (!arr) return;
+  var msg = arr.find(function(m) { return m.id === msgId; });
+  if (!msg || !msg.text) { showToast('Nothing to copy'); return; }
+  if (navigator.clipboard) {
+    navigator.clipboard.writeText(msg.text).then(function() { showToast('&#128203; Copied!'); });
+  } else {
+    var ta = document.createElement('textarea');
+    ta.value = msg.text;
+    document.body.appendChild(ta);
+    ta.select(); document.execCommand('copy');
+    document.body.removeChild(ta);
+    showToast('&#128203; Copied!');
+  }
+}
+
 var toastTimer=null;
 function showToast(msg){
   var t=document.getElementById("toast");
@@ -1290,8 +1420,10 @@ function showInstallBanner() {
   var banner = document.getElementById("install-banner");
   var dismissed = sessionStorage.getItem("install-dismissed");
   var installed = localStorage.getItem("app-installed");
+  // Already running as installed PWA — never show
+  if (window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone) return;
   if (!dismissed && !installed) {
-    setTimeout(function() { banner.classList.add("show"); }, 2000);
+    banner.classList.add("show");
   }
 }
 
@@ -1371,7 +1503,16 @@ function showIOSInstructions() {
 var _origShowApp = showApp;
 showApp = function() {
   _origShowApp();
-  if (deferredPrompt) showInstallBanner();
+  // Show install banner 3 seconds after login (gives UI time to settle)
+  setTimeout(function() {
+    if (deferredPrompt) showInstallBanner();
+    else if (!localStorage.getItem("app-installed")) {
+      // For iOS/non-Chrome: show after a few sessions
+      var visits = parseInt(sessionStorage.getItem("visit-count")||"0") + 1;
+      sessionStorage.setItem("visit-count", visits);
+      if (visits >= 2) showInstallBanner();
+    }
+  }, 3000);
 };
 
 // App installed event
