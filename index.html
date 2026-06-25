@@ -432,16 +432,18 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
 /* ─── MESSAGE CONTEXT MENU ─── */
 .msg-ctx-menu{
   position:fixed;background:var(--navy2);border:1px solid var(--border);
-  border-radius:10px;padding:4px;z-index:5000;min-width:140px;
-  box-shadow:0 8px 24px rgba(0,0,0,.5);
-  animation:ctxin .15s ease;
+  border-radius:12px;padding:6px;z-index:5000;min-width:180px;
+  box-shadow:0 8px 32px rgba(0,0,0,.6);
+  animation:ctxin .15s ease;touch-action:none;
 }
 @keyframes ctxin{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
 .msg-ctx-item{
-  display:flex;align-items:center;gap:10px;padding:9px 14px;
-  border-radius:7px;cursor:pointer;font-size:13px;color:var(--text);
-  transition:background .15s;
+  display:flex;align-items:center;gap:10px;padding:12px 16px;
+  border-radius:7px;cursor:pointer;font-size:14px;color:var(--text);
+  transition:background .15s;min-height:44px;-webkit-tap-highlight-color:rgba(212,160,23,.2);
 }
+/* Immediate visual feedback on touch */
+.msg-ctx-item:active{background:var(--navy3)}
 .msg-ctx-item:hover{background:var(--navy3)}
 .msg-ctx-item.danger{color:var(--red)}
 .msg-ctx-item.danger:hover{background:rgba(239,68,68,.1)}
@@ -493,13 +495,13 @@ html,body{height:100%;background:var(--navy);color:var(--text);font-family:var(-
     flex-direction:column;justify-content:center;
     align-items:center;padding:8px 4px;gap:6px;
   }
-  /* Hide non-critical buttons on very narrow sidebar */
-  .sidebar-footer #btn-admin{display:none !important}
-  /* Keep + and logout always visible */
+  /* Keep all footer buttons visible on mobile — stacked layout has room */
+  /* All footer buttons on mobile */
   .sidebar-footer .icon-btn{
-    width:40px;height:40px;border-radius:8px;
+    width:36px;height:36px;border-radius:8px;
     background:rgba(255,255,255,0.04);
     color:#8899AA !important;
+    font-size:16px;
   }
   /* Hide logout text label on mobile — show icon only */
   .logout-label{display:none}
@@ -1369,37 +1371,69 @@ function closeModal(id){ document.getElementById(id).style.display="none"; }
 
 // ── TOAST ─────────────────────────────────────────────────────────────────────
 // ── MESSAGE CONTEXT MENU ─────────────────────────────────────────────────────
+var _ctxOpenTime = 0;  // timestamp when menu opened
+
 function showMsgCtxMenu(x, y, msgId) {
   var menu = document.getElementById('msg-ctx-menu');
+  _ctxOpenTime = Date.now();
+
   menu.innerHTML =
     '<div class="msg-ctx-item" id="ctx-copy"><span>&#128203;</span> Copy message</div>' +
     '<div class="msg-ctx-divider"></div>' +
     '<div class="msg-ctx-item danger" id="ctx-delete"><span>&#128465;</span> Delete message</div>';
 
-  // Attach handlers using captured msgId (avoids quote-escaping issues)
-  document.getElementById('ctx-copy').onclick   = function() { copyMessage(msgId); };
-  document.getElementById('ctx-delete').onclick = function() { deleteMessage(msgId); };
+  // Use pointerdown so it fires on first touch contact (before touchend/click)
+  // This ensures the action fires BEFORE any document close listener
+  var copyEl   = document.getElementById('ctx-copy');
+  var deleteEl = document.getElementById('ctx-delete');
+
+  function handleCopy(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    copyMessage(msgId);
+  }
+  function handleDelete(e) {
+    e.stopPropagation();
+    e.preventDefault();
+    deleteMessage(msgId);
+  }
+
+  copyEl.addEventListener('pointerdown',   handleCopy,   {once: true});
+  deleteEl.addEventListener('pointerdown', handleDelete, {once: true});
+  // Also keep click for desktop fallback
+  copyEl.addEventListener('click',   handleCopy,   {once: true});
+  deleteEl.addEventListener('click', handleDelete, {once: true});
 
   menu.style.display = 'block';
 
-  // Smart positioning — keep menu inside viewport
-  var menuW = 160, menuH = 90;
+  // Position menu — keep inside viewport
+  var menuW = 170, menuH = 96;
   var vw = window.innerWidth, vh = window.innerHeight;
   var left = x + menuW > vw ? vw - menuW - 12 : x;
-  var top  = y + menuH > vh ? y - menuH - 8   : y + 4;
+  var top  = y + menuH > vh ? y - menuH - 8   : y + 8;
   menu.style.left = left + 'px';
   menu.style.top  = top  + 'px';
 
-  // Close on next click/tap anywhere
+  // Close when user taps/clicks anywhere OUTSIDE the menu
+  // Use a 400ms guard so the lift of the long-press doesn't close it instantly
   setTimeout(function() {
-    document.addEventListener('click', closeMsgCtxMenu, {once: true});
-    document.addEventListener('touchstart', closeMsgCtxMenu, {once: true});
-  }, 50);
+    document.addEventListener('pointerdown', _closeCtxIfOutside);
+  }, 400);
+}
+
+function _closeCtxIfOutside(e) {
+  var menu = document.getElementById('msg-ctx-menu');
+  if (!menu) return;
+  // If tap is inside the menu, don't close
+  if (menu.contains(e.target)) return;
+  closeMsgCtxMenu();
+  document.removeEventListener('pointerdown', _closeCtxIfOutside);
 }
 
 function closeMsgCtxMenu() {
   var menu = document.getElementById('msg-ctx-menu');
   if (menu) menu.style.display = 'none';
+  document.removeEventListener('pointerdown', _closeCtxIfOutside);
 }
 
 function deleteMessage(msgId) {
